@@ -3,7 +3,7 @@ class Task {
   final int? id;
   final String name;
   final String description;
-  final String time;
+  final String time; 
   final String priority;
   final String category;
   final bool isDone;

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../helper/database_helper.dart';
+import '../models/task.dart';
+
 class CategoryTheme {
   const CategoryTheme({
     required this.textColor,
@@ -90,59 +93,111 @@ class _HomeScreenState extends State<HomeScreen> {
     },
   ];
 
-  late final List<Map<String, dynamic>> _tasks = [
-    {
-      'name': 'Menyelesaikan laporan',
-      'description': 'Merapikan dan mengirim laporan mingguan.',
-      'time': '09:00',
-      'priority': 'tinggi',
-      'category': 'Pekerjaan',
-      'icon': Icons.work_outline,
-      'status': 'selesai',
-    },
-    {
-      'name': 'Membaca materi Flutter',
-      'description': 'Mempelajari dasar state management.',
-      'time': '10:30',
-      'priority': 'sedang',
-      'category': 'Belajar',
-      'icon': Icons.menu_book_outlined,
-      'status': 'selesai',
-    },
-    {
-      'name': 'Olahraga ringan',
-      'description': 'Berjalan kaki selama 30 menit.',
-      'time': '16:00',
-      'priority': 'sedang',
-      'category': 'Kesehatan',
-      'icon': Icons.monitor_heart_outlined,
-      'status': 'belum',
-    },
-    {
-      'name': 'Merapikan kamar',
-      'description': 'Merapikan meja dan menyapu lantai.',
-      'time': '18:00',
-      'priority': 'rendah',
-      'category': 'Rumah',
-      'icon': Icons.home_outlined,
-      'status': 'belum',
-    },
-    {
-      'name': 'Membaca buku',
-      'description': 'Membaca satu bab sebelum tidur.',
-      'time': '20:30',
-      'priority': 'rendah',
-      'category': 'Santai',
-      'icon': Icons.coffee_outlined,
-      'status': 'belum',
-    },
-  ];
+  Future<void> _loadTask({bool delay = true}) async {
+    if (delay) {
+      await Future.delayed(const Duration(seconds: 2));
+    }
+
+    final task = await DatabaseHelper.instance.getTasks();
+    if (!mounted) return;
+    setState(() {
+      _tasks = task;
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _saveTask(BuildContext sheetContext, Task? oldTask) async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final task = Task(
+      id: oldTask?.id,
+      name: nameController.text.trim(),
+      description: descController.text.trim(),
+      time: timeController.text,
+      priority: selectedPriority!,
+      category: selectedCategory!,
+      isDone: oldTask?.isDone ?? false,
+    );
+
+    if (oldTask == null) {
+      await DatabaseHelper.instance.insertTask(task);
+    } else {
+      await DatabaseHelper.instance.updateTask(task);
+    }
+
+    if (!sheetContext.mounted) return;
+    Navigator.pop(sheetContext);
+    setState(() {
+      _isLoading = true;
+    });
+    await _loadTask();
+  }
+
+  List<Task> get _filteredTask {
+    final selectedCategory = _category[_selectedCategoryIndex]['category'];
+    return _tasks.where((t) {
+      final statusMatch = switch (_selectedFilterIndex) {
+        1 => t.isDone,
+        2 => !t.isDone,
+        _ => true,
+      };
+      final categoryMatch =
+          _selectedCategoryIndex == 0 || t.category == selectedCategory;
+      return statusMatch && categoryMatch;
+    }).toList();
+  }
+
+    Future<void> _deleteTask(Task task) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Text(
+          'Hapus Task?',
+          style: TextStyle(color: Colors.blueAccent),
+        ),
+        content: Text('"${task.name}" akan dihapus permanen!'),
+        actions: [
+          TextButton(
+            style: TextButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Batal', style: TextStyle(color: Colors.white)),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(backgroundColor: Colors.teal),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Yes', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (yes != true) return;
+    await DatabaseHelper.instance.deleteTask(task.id!);
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+    });
+    await _loadTask();
+  }
+
+  List<Task> _tasks = [];
+
+  bool _isLoading = true;
+
+  final _formKey = GlobalKey<FormState>();
+  final nameController = TextEditingController();
+  final descController = TextEditingController();
+  final timeController = TextEditingController();
+  String? selectedPriority;
+  String? selectedCategory;
 
   @override
   void initState() {
     super.initState();
     _selectedFilterIndex = 0;
     _selectedCategoryIndex = 0;
+    _loadTask();
   }
 
   Padding top_card() {
@@ -168,10 +223,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       color: Colors.blueAccent,
                       borderRadius: BorderRadius.circular(8.0),
                     ),
-                    child: const Icon(
-                      Icons.auto_awesome,
-                      color: Colors.white,
-                    ),
+                    child: const Icon(Icons.auto_awesome, color: Colors.white),
                   ),
                   const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -368,20 +420,17 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showAddTaskModal(BuildContext context) {
-    final nameController = TextEditingController();
-    final descController = TextEditingController();
-    final timeController = TextEditingController();
-    String? selectedPriority;
-    String? selectedCategory;
+    void _showAddTaskModal(BuildContext context, {Task? task}) {
+    nameController.text = task?.name ?? '';
+    descController.text = task?.description ?? '';
+    timeController.text = task?.time ?? '';
+    selectedPriority = task?.priority;
+    selectedCategory = task?.category;
 
     InputDecoration inputDecoration({String? hintText, Widget? suffixIcon}) {
       return InputDecoration(
         hintText: hintText,
-        hintStyle: const TextStyle(
-          color: Color(0xff94A3B8),
-          fontSize: 14,
-        ),
+        hintStyle: const TextStyle(color: Color(0xff94A3B8), fontSize: 14),
         suffixIcon: suffixIcon,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 14.0,
@@ -439,11 +488,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     const SizedBox(height: 16.0),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 20.0),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20.0),
                       child: Text(
-                        'Tambah Kegiatan Baru',
-                        style: TextStyle(
+                        task == null ? 'Tambah Kegiatan Baru' : 'Ubah Kegiatan',
+                        style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                           color: Colors.black,
@@ -459,227 +508,205 @@ class _HomeScreenState extends State<HomeScreen> {
                     Expanded(
                       child: SingleChildScrollView(
                         padding: const EdgeInsets.all(20.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('NAMA KEGIATAN', style: labelStyle),
-                            const SizedBox(height: 8.0),
-                            TextField(
-                              controller: nameController,
-                              decoration: inputDecoration(
-                                hintText:
-                                    'Contoh: Meeting, Belajar, Sholat',
+                        child: Form(
+                          key: _formKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('NAMA KEGIATAN', style: labelStyle),
+                              const SizedBox(height: 8.0),
+                              TextFormField(
+                                controller: nameController,
+                                decoration: inputDecoration(
+                                  hintText: 'Contoh: Meeting, Belajar, Sholat',
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 16.0),
-                            const Text(
-                              'CATATAN / DESKTIPSI DETAIL',
-                              style: labelStyle,
-                            ),
-                            const SizedBox(height: 8.0),
-                            TextField(
-                              controller: descController,
-                              maxLines: 3,
-                              decoration: inputDecoration(
-                                hintText:
-                                    'Detail Kegiatan, Lokasi, Ataupun Target',
+                              const SizedBox(height: 16.0),
+                              const Text(
+                                'CATATAN / DESKTIPSI DETAIL',
+                                style: labelStyle,
                               ),
-                            ),
-                            const SizedBox(height: 16.0),
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Text(
-                                        'JAM KEGIATAN',
-                                        style: labelStyle,
-                                      ),
-                                      const SizedBox(height: 8.0),
-                                      TextField(
-                                        controller: timeController,
-                                        readOnly: true,
-                                        onTap: () async {
-                                          final picked = await showTimePicker(
-                                            context: context,
-                                            initialTime: TimeOfDay.now(),
-                                            builder: (context, child) {
-                                              return MediaQuery(
-                                                data: MediaQuery.of(context)
-                                                    .copyWith(
-                                                  alwaysUse24HourFormat: true,
-                                                ),
-                                                child: child!,
-                                              );
-                                            },
-                                          );
-                                          if (picked != null) {
-                                            final hh = picked.hour
-                                                .toString()
-                                                .padLeft(2, '0');
-                                            final mm = picked.minute
-                                                .toString()
-                                                .padLeft(2, '0');
-                                            setModalState(() {
-                                              timeController.text = '$hh:$mm';
-                                            });
-                                          }
-                                        },
-                                        decoration: inputDecoration(
-                                          hintText: 'HH:mm',
-                                          suffixIcon: const Icon(
-                                            Icons.access_time_outlined,
-                                            color: Color(0xff64748B),
-                                            size: 20,
-                                          ),
+                              const SizedBox(height: 8.0),
+                              TextFormField(
+                                controller: descController,
+                                maxLines: 3,
+                                decoration: inputDecoration(
+                                  hintText:
+                                      'Detail Kegiatan, Lokasi, Ataupun Target',
+                                ),
+                              ),
+                              const SizedBox(height: 16.0),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'JAM KEGIATAN',
+                                          style: labelStyle,
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 12.0),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Text(
-                                        'PRIORITAS',
-                                        style: labelStyle,
-                                      ),
-                                      const SizedBox(height: 8.0),
-                                      DropdownButtonFormField<String>(
-                                        initialValue: selectedPriority,
-                                        hint: const Text(
-                                          'Pilih',
-                                          style: TextStyle(
-                                            color: Colors.black87,
-                                            fontSize: 14,
-                                          ),
-                                        ),
-                                        dropdownColor: Colors.white,
-                                        decoration: inputDecoration(),
-                                        items: ['rendah', 'sedang', 'tinggi']
-                                            .map(
-                                              (p) => DropdownMenuItem<String>(
-                                                value: p,
-                                                child: Text(p),
-                                              ),
-                                            )
-                                            .toList(),
-                                        onChanged: (val) {
-                                          setModalState(() {
-                                            selectedPriority = val;
-                                          });
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 16.0),
-                            const Text(
-                              'KATEGORI KEGIATAN',
-                              style: labelStyle,
-                            ),
-                            const SizedBox(height: 8.0),
-                            DropdownButtonFormField<String>(
-                              initialValue: selectedCategory,
-                              hint: const Text(
-                                'Pilih Kategori',
-                                style: TextStyle(
-                                  color: Colors.black87,
-                                  fontSize: 14,
-                                ),
-                              ),
-                              dropdownColor: Colors.white,
-                              decoration: inputDecoration(),
-                              items: _category
-                                  .where(
-                                    (c) => c['category'] != 'Semua Kategori',
-                                  )
-                                  .map(
-                                    (c) => DropdownMenuItem<String>(
-                                      value: c['category'] as String,
-                                      child: Row(
-                                        children: [
-                                          Icon(
-                                            c['icon'] as IconData,
-                                            size: 20,
-                                            color: Colors.blueAccent,
-                                          ),
-                                          const SizedBox(width: 10.0),
-                                          Text(
-                                            c['category'] as String,
-                                            style: const TextStyle(
-                                              color: Colors.blueAccent,
+                                        const SizedBox(height: 8.0),
+                                        TextFormField(
+                                          controller: timeController,
+                                          readOnly: true,
+                                          onTap: () async {
+                                            final picked = await showTimePicker(
+                                              context: context,
+                                              initialTime: TimeOfDay.now(),
+                                              builder: (context, child) {
+                                                return MediaQuery(
+                                                  data: MediaQuery.of(context)
+                                                      .copyWith(
+                                                        alwaysUse24HourFormat:
+                                                            true,
+                                                      ),
+                                                  child: child!,
+                                                );
+                                              },
+                                            );
+                                            if (picked != null) {
+                                              final hh = picked.hour
+                                                  .toString()
+                                                  .padLeft(2, '0');
+                                              final mm = picked.minute
+                                                  .toString()
+                                                  .padLeft(2, '0');
+                                              setModalState(() {
+                                                timeController.text = '$hh:$mm';
+                                              });
+                                            }
+                                          },
+                                          decoration: inputDecoration(
+                                            hintText: 'HH:mm',
+                                            suffixIcon: const Icon(
+                                              Icons.access_time_outlined,
+                                              color: Color(0xff64748B),
+                                              size: 20,
                                             ),
                                           ),
-                                        ],
-                                      ),
+                                        ),
+                                      ],
                                     ),
-                                  )
-                                  .toList(),
-                              onChanged: (val) {
-                                setModalState(() {
-                                  selectedCategory = val;
-                                });
-                              },
-                            ),
-                            const SizedBox(height: 24.0),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.blueAccent,
-                                  foregroundColor: Colors.white,
-                                  elevation: 0,
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16.0,
                                   ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12.0),
+                                  const SizedBox(width: 12.0),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'PRIORITAS',
+                                          style: labelStyle,
+                                        ),
+                                        const SizedBox(height: 8.0),
+                                        DropdownButtonFormField<String>(
+                                          initialValue: selectedPriority,
+                                          validator: (v) => v == null ? 'tidak boleh kosong' : null,
+                                          hint: const Text(
+                                            'Pilih',
+                                            style: TextStyle(
+                                              color: Colors.black87,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                          dropdownColor: Colors.white,
+                                          decoration: inputDecoration(),
+                                          items: ['rendah', 'sedang', 'tinggi']
+                                              .map(
+                                                (p) => DropdownMenuItem<String>(
+                                                  value: p,
+                                                  child: Text(p),
+                                                ),
+                                              )
+                                              .toList(),
+                                          onChanged: (val) {
+                                            setModalState(() {
+                                              selectedPriority = val;
+                                            });
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16.0),
+                              const Text('KATEGORI KEGIATAN', style: labelStyle),
+                              const SizedBox(height: 8.0),
+                              DropdownButtonFormField<String>(
+                                initialValue: selectedCategory,
+                                validator: (v) => v == null ? 'tidak boleh kosong' : null,
+                                hint: const Text(
+                                  'Pilih Kategori',
+                                  style: TextStyle(
+                                    color: Colors.black87,
+                                    fontSize: 14,
                                   ),
                                 ),
-                                onPressed: () {
-                                  if (nameController.text.isNotEmpty) {
-                                    final catName =
-                                        selectedCategory ?? 'Pekerjaan';
-                                    final catData = _category.firstWhere(
-                                      (item) => item['category'] == catName,
-                                    );
-                                    setState(() {
-                                      _tasks.add({
-                                        'name': nameController.text,
-                                        'description': descController.text,
-                                        'time': timeController.text.isNotEmpty
-                                            ? timeController.text
-                                            : '09:00',
-                                        'priority':
-                                            selectedPriority ?? 'sedang',
-                                        'category': catName,
-                                        'icon': catData['icon'],
-                                        'status': 'belum',
-                                      });
-                                    });
-                                    Navigator.pop(context);
-                                  }
+                                dropdownColor: Colors.white,
+                                decoration: inputDecoration(),
+                                items: _category
+                                    .where(
+                                      (c) => c['category'] != 'Semua Kategori',
+                                    )
+                                    .map(
+                                      (c) => DropdownMenuItem<String>(
+                                        value: c['category'] as String,
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              c['icon'] as IconData,
+                                              size: 20,
+                                              color: Colors.blueAccent,
+                                            ),
+                                            const SizedBox(width: 10.0),
+                                            Text(
+                                              c['category'] as String,
+                                              style: const TextStyle(
+                                                color: Colors.blueAccent,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (val) {
+                                  setModalState(() {
+                                    selectedCategory = val;
+                                  });
                                 },
-                                icon: const Icon(Icons.check, size: 20),
-                                label: const Text(
-                                  'Tambah Ke List',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15,
+                              ),
+                              const SizedBox(height: 24.0),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blueAccent,
+                                    foregroundColor: Colors.white,
+                                    elevation: 0,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 16.0,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12.0),
+                                    ),
+                                  ),
+                                  onPressed: () {
+                                    _saveTask(context, task);
+                                  },
+                                  icon: const Icon(Icons.check, size: 20),
+                                  label: Text(
+                                    task == null ? 'Tambah Ke List' : 'Ubah List',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -715,291 +742,282 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: SafeArea(
         child: Column(
-          children: [
-            top_card(),
-            filter_area(),
-            category_area(),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(right: 16.0, left: 16.0),
-                child: ListView.builder(
-                  itemCount: _tasks.length,
-                  shrinkWrap: true,
-                  itemBuilder: (BuildContext context, int index) {
-                    final task = _tasks[index];
-                    final cat = _category.firstWhere(
-                      (item) => item['category'] == task['category'],
-                    );
-                    final CategoryTheme? theme =
-                        cat['theme'] as CategoryTheme?;
+          children: [top_card(), filter_area(), category_area(), taskList()],
+        ),
+      ),
+    );
+  }
 
-                    return Card(
-                      color: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16.0),
-                        side: const BorderSide(color: Color(0xffE1E7F1)),
+  Expanded taskList() {
+    if (_isLoading) {
+      return const Expanded(
+        child: Center(
+          child: CircularProgressIndicator(color: Colors.blueAccent),
+        ),
+      );
+    }
+
+    final tasks = _filteredTask;
+    if (tasks.isEmpty) {
+      return const Expanded(
+        child: Center(
+          child: Text(
+            'Tidak ada kegiatan',
+            style: TextStyle(fontSize: 16, color: Color(0xff94A3B8)),
+          ),
+        ),
+      );
+    }
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.only(right: 16.0, left: 16.0),
+        child: ListView.builder(
+          itemCount: tasks.length,
+          shrinkWrap: true,
+          itemBuilder: (BuildContext context, int index) {
+            final task = tasks[index];
+            final cat = _category.firstWhere(
+              (item) => item['category'] == task.category,
+            );
+            final CategoryTheme? theme = cat['theme'] as CategoryTheme?;
+
+            return Card(
+              color: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16.0),
+                side: const BorderSide(color: Color(0xffE1E7F1)),
+              ),
+              child: InkWell(
+                onTap: () {},
+                child: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8.0),
+                        child: Transform.scale(
+                          scale: 1.2,
+                          child: Checkbox(
+                            activeColor: Colors.blueAccent,
+                            side: const BorderSide(color: Color(0xff778294)),
+                            shape: const RoundedRectangleBorder(
+                              borderRadius: BorderRadius.all(
+                                Radius.circular(4.0),
+                              ),
+                            ),
+                            value: task.isDone,
+                            onChanged: (checked) async {
+                              await DatabaseHelper.instance.updateTask(
+                                task.copyWith(isDone: checked ?? false),
+                              );
+                              await _loadTask(delay: false);
+                            },
+                          ),
+                        ),
                       ),
-                      child: InkWell(
-                        onTap: () {},
-                        child: Padding(
-                          padding: const EdgeInsets.all(8.0),
-                          child: Row(
+                      Padding(
+                        padding: const EdgeInsets.only(left: 4.0),
+                        child: SizedBox(
+                          width: 250,
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Padding(
-                                padding: const EdgeInsets.only(right: 8.0),
-                                child: Transform.scale(
-                                  scale: 1.2,
-                                  child: Checkbox(
-                                    activeColor: Colors.blueAccent,
-                                    side: const BorderSide(
-                                      color: Color(0xff778294),
-                                    ),
-                                    shape: const RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.all(
-                                        Radius.circular(4.0),
-                                      ),
-                                    ),
-                                    value: task['status'] == 'selesai',
-                                    onChanged: (checked) {
-                                      setState(() {
-                                        task['status'] = checked == true
-                                            ? 'selesai'
-                                            : 'belum';
-                                      });
-                                    },
-                                  ),
+                              Text(
+                                task.name,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 18,
                                 ),
                               ),
-                              Padding(
-                                padding: const EdgeInsets.only(left: 4.0),
-                                child: SizedBox(
-                                  width: 250,
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        task['name'],
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 18,
-                                        ),
-                                      ),
-                                      Text(
-                                        task['description'],
-                                        style: const TextStyle(
+                              Text(
+                                task.description,
+                                style: const TextStyle(
+                                  color: Color(0xff778294),
+                                ),
+                              ),
+                              const SizedBox(height: 5),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Container(
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.access_time_outlined,
+                                          size: 16.0,
                                           color: Color(0xff778294),
                                         ),
+                                        Text(
+                                          task.time,
+                                          style: const TextStyle(
+                                            color: Color(0xff778294),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      color: theme?.backgroundColor,
+                                      borderRadius: const BorderRadius.all(
+                                        Radius.circular(8.0),
                                       ),
-                                      const SizedBox(height: 5),
-                                      Row(
+                                      border: Border.all(
+                                        color:
+                                            theme?.borderColor ??
+                                            Colors.transparent,
+                                      ),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(
+                                        right: 8.0,
+                                        left: 8.0,
+                                        top: 4.0,
+                                        bottom: 4.0,
+                                      ),
+                                      child: Row(
                                         mainAxisAlignment:
                                             MainAxisAlignment.spaceBetween,
                                         children: [
-                                          Container(
-                                            child: Row(
-                                              children: [
-                                                const Icon(
-                                                  Icons.access_time_outlined,
-                                                  size: 16.0,
-                                                  color: Color(0xff778294),
-                                                ),
-                                                Text(
-                                                  task['time'],
-                                                  style: const TextStyle(
-                                                    color: Color(0xff778294),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
+                                          Icon(
+                                            cat['icon'] as IconData,
+                                            size: 16.0,
+                                            color: theme?.textColor,
                                           ),
-                                          Container(
-                                            decoration: BoxDecoration(
-                                              color: theme?.backgroundColor,
-                                              borderRadius:
-                                                  const BorderRadius.all(
-                                                Radius.circular(8.0),
-                                              ),
-                                              border: Border.all(
-                                                color: theme?.borderColor ??
-                                                    Colors.transparent,
-                                              ),
-                                            ),
-                                            child: Padding(
-                                              padding: const EdgeInsets.only(
-                                                right: 8.0,
-                                                left: 8.0,
-                                                top: 4.0,
-                                                bottom: 4.0,
-                                              ),
-                                              child: Row(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment
-                                                        .spaceBetween,
-                                                children: [
-                                                  Icon(
-                                                    task['icon'],
-                                                    size: 16.0,
-                                                    color: theme?.textColor,
-                                                  ),
-                                                  Text(
-                                                    task['category'],
-                                                    style: TextStyle(
-                                                      color: theme?.textColor,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                          Container(
-                                            decoration: BoxDecoration(
-                                              color: task['priority'] ==
-                                                      'tinggi'
-                                                  ? const Color(0xFFFEF2F2)
-                                                  : (task['priority'] ==
-                                                          'sedang'
-                                                      ? const Color(0xFFFFFBEB)
-                                                      : const Color(
-                                                          0xFFECFDF5)),
-                                              borderRadius:
-                                                  const BorderRadius.all(
-                                                Radius.circular(8.0),
-                                              ),
-                                              border: Border.all(
-                                                color: task['priority'] ==
-                                                        'tinggi'
-                                                    ? const Color(0xFFFECACA)
-                                                    : (task['priority'] ==
-                                                            'sedang'
-                                                        ? const Color(
-                                                            0xFFFDE68A)
-                                                        : const Color(
-                                                            0xFFA7F3D0)),
-                                              ),
-                                            ),
-                                            child: Padding(
-                                              padding: const EdgeInsets.only(
-                                                right: 8.0,
-                                                left: 8.0,
-                                                top: 4.0,
-                                                bottom: 4.0,
-                                              ),
-                                              child: Row(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment
-                                                        .spaceBetween,
-                                                children: [
-                                                  Icon(
-                                                    Icons.flag_outlined,
-                                                    size: 16.0,
-                                                    color: task['priority'] ==
-                                                            'tinggi'
-                                                        ? const Color(
-                                                            0xFFDC2626)
-                                                        : (task['priority'] ==
-                                                                'sedang'
-                                                            ? const Color(
-                                                                0xFFD97706)
-                                                            : const Color(
-                                                                0xFF059669)),
-                                                  ),
-                                                  Text(
-                                                    task['priority'],
-                                                    style: TextStyle(
-                                                      color: task['priority'] ==
-                                                              'tinggi'
-                                                          ? const Color(
-                                                              0xFFDC2626)
-                                                          : (task['priority'] ==
-                                                                  'sedang'
-                                                              ? const Color(
-                                                                  0xFFD97706)
-                                                              : const Color(
-                                                                  0xFF059669)),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
+                                          Text(
+                                            task.category,
+                                            style: TextStyle(
+                                              color: theme?.textColor,
                                             ),
                                           ),
                                         ],
                                       ),
-                                    ],
+                                    ),
                                   ),
-                                ),
-                              ),
-                              Expanded(
-                                child: SizedBox(
-                                  width: 10,
-                                  child: PopupMenuButton<String>(
-                                    color: Colors.white,
-                                    shape: const RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.all(
-                                        Radius.circular(16.0),
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      color: task.priority == 'tinggi'
+                                          ? const Color(0xFFFEF2F2)
+                                          : (task.priority == 'sedang'
+                                                ? const Color(0xFFFFFBEB)
+                                                : const Color(0xFFECFDF5)),
+                                      borderRadius: const BorderRadius.all(
+                                        Radius.circular(8.0),
+                                      ),
+                                      border: Border.all(
+                                        color: task.priority == 'tinggi'
+                                            ? const Color(0xFFFECACA)
+                                            : (task.priority == 'sedang'
+                                                  ? const Color(0xFFFDE68A)
+                                                  : const Color(0xFFA7F3D0)),
                                       ),
                                     ),
-                                    icon: const Icon(Icons.more_vert),
-                                    onSelected: (value) {
-                                      if (value == 'edit') {
-                                        //code edit di sini
-                                      } else if (value == 'delete') {
-                                        //code hapus di sini
-                                      }
-                                    },
-                                    itemBuilder: (context) => [
-                                      const PopupMenuItem(
-                                        value: 'edit',
-                                        child: Row(
-                                          children: [
-                                            Icon(
-                                              Icons.edit,
-                                              color: Colors.blueAccent,
-                                            ),
-                                            SizedBox(width: 5),
-                                            Text(
-                                              'Edit',
-                                              style: TextStyle(
-                                                color: Colors.blueAccent,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(
+                                        right: 8.0,
+                                        left: 8.0,
+                                        top: 4.0,
+                                        bottom: 4.0,
                                       ),
-                                      const PopupMenuItem(
-                                        value: 'delete',
-                                        child: Row(
-                                          children: [
-                                            Icon(
-                                              Icons.delete,
-                                              color: Colors.redAccent,
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Icon(
+                                            Icons.flag_outlined,
+                                            size: 16.0,
+                                            color: task.priority == 'tinggi'
+                                                ? const Color(0xFFDC2626)
+                                                : (task.priority == 'sedang'
+                                                      ? const Color(0xFFD97706)
+                                                      : const Color(
+                                                          0xFF059669,
+                                                        )),
+                                          ),
+                                          Text(
+                                            task.priority,
+                                            style: TextStyle(
+                                              color: task.priority == 'tinggi'
+                                                  ? const Color(0xFFDC2626)
+                                                  : (task.priority == 'sedang'
+                                                        ? const Color(
+                                                            0xFFD97706,
+                                                          )
+                                                        : const Color(
+                                                            0xFF059669,
+                                                          )),
                                             ),
-                                            SizedBox(width: 5),
-                                            Text(
-                                              'Delete',
-                                              style: TextStyle(
-                                                color: Colors.redAccent,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
+                                          ),
+                                        ],
                                       ),
-                                    ],
+                                    ),
                                   ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: SizedBox(
+                          width: 10,
+                          child: PopupMenuButton<String>(
+                            color: Colors.white,
+                            shape: const RoundedRectangleBorder(
+                              borderRadius: BorderRadius.all(
+                                Radius.circular(16.0),
+                              ),
+                            ),
+                            icon: const Icon(Icons.more_vert),
+                            onSelected: (value) {
+                              if (value == 'edit') {
+                                _showAddTaskModal(context, task: task);
+                              } else if (value == 'delete') {
+                                _deleteTask(task);
+                              }
+                            },
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(
+                                value: 'edit',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.edit, color: Colors.blueAccent),
+                                    SizedBox(width: 5),
+                                    Text(
+                                      'Edit',
+                                      style: TextStyle(
+                                        color: Colors.blueAccent,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const PopupMenuItem(
+                                value: 'delete',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.delete, color: Colors.redAccent),
+                                    SizedBox(width: 5),
+                                    Text(
+                                      'Delete',
+                                      style: TextStyle(color: Colors.redAccent),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
                           ),
                         ),
                       ),
-                    );
-                  },
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );

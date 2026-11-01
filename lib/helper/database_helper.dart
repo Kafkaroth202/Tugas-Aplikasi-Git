@@ -10,7 +10,7 @@ class DatabaseHelper {
   // The one and only instance, used by every other class
   static final DatabaseHelper instance = DatabaseHelper._();
 
-  static const _dbName = 'tasklist.db';
+  static const _dbName = 'tasklist2.db';
   static const _dbVersion = 1;
   static const tableTask = 'tasks';
 
@@ -33,10 +33,10 @@ class DatabaseHelper {
     await db.insert(
       tableTask,
       const Task(
-        name: 'Menyelesaikan Tugas',
+        name: 'Menyelesaikan tugas',
         description: 'Merapikan dan mengirim laporan mingguan',
-        time: '09.00',
-        priority: 'Sedang',
+        time: '09:00',
+        priority: 'sedang',
         category: 'Pekerjaan',
         isDone: true,
       ).toMap(),
